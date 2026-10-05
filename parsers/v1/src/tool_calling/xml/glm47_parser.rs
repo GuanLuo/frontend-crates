@@ -567,7 +567,7 @@ fn get_param_schema_type<'a>(
         });
     }
     // Prefer string in unions because JSON-looking text is ambiguous.
-    if schema_has_type(param, "string") {
+    if schema_has_type(schema, param, "string") {
         return Some("string");
     }
     if let Some(schema_type) = param.get("type").and_then(Value::as_str) {
@@ -595,7 +595,7 @@ fn get_param_schema_type<'a>(
     candidates
         .iter()
         .copied()
-        .find(|candidate| schema_has_type(param, candidate))
+        .find(|candidate| schema_has_type(schema, param, candidate))
 }
 
 const MAX_NULL_SCHEMA_REF_DEPTH: usize = 16;
@@ -617,13 +617,13 @@ fn intersect_null_matches(left: Option<bool>, right: Option<bool>) -> Option<boo
     }
 }
 
-fn has_unsupported_null_ref_scope(schema: &Value) -> bool {
+fn has_unsupported_schema_ref_scope(schema: &Value) -> bool {
     ["$id", "$dynamicRef", "$recursiveRef"]
         .iter()
         .any(|keyword| schema.get(*keyword).and_then(Value::as_str).is_some())
 }
 
-fn resolve_null_schema_ref<'a>(reference: &str, root: &'a Value) -> Option<&'a Value> {
+fn resolve_local_schema_ref<'a>(reference: &str, root: &'a Value) -> Option<&'a Value> {
     // URI percent-decoding precedes JSON Pointer's ~0/~1 decoding.
     let pointer = reference.strip_prefix('#')?;
     let decoded;
@@ -653,7 +653,7 @@ fn resolve_null_schema_ref<'a>(reference: &str, root: &'a Value) -> Option<&'a V
     // A nested $id changes the reference scope. Do not jump through it while
     // resolving a fragment against the original tool-parameter document.
     for (end, _) in pointer.char_indices().filter(|(_, ch)| *ch == '/').skip(1) {
-        if has_unsupported_null_ref_scope(root.pointer(&pointer[..end])?) {
+        if has_unsupported_schema_ref_scope(root.pointer(&pointer[..end])?) {
             return None;
         }
     }
@@ -685,7 +685,7 @@ fn schema_null_match<'a>(
     if let Some(reference) = schema.get("$ref") {
         let target = reference
             .as_str()
-            .and_then(|reference| resolve_null_schema_ref(reference, root));
+            .and_then(|reference| resolve_local_schema_ref(reference, root));
         permits = if let Some(target) = target
             && ref_depth < MAX_NULL_SCHEMA_REF_DEPTH
             && !active_refs
@@ -752,12 +752,36 @@ fn schema_null_match<'a>(
     permits
 }
 
-fn schema_has_type(schema: &Value, expected: &str) -> bool {
-    schema_type_match(schema, expected) == Some(true)
+fn schema_has_type(root: &Value, schema: &Value, expected: &str) -> bool {
+    let mut remaining = 1024;
+    let matched = schema_type_match(root, schema, expected, 0, &mut remaining);
+    remaining > 0 && matched == Some(true)
 }
 
 // None means no type hint: e.g. minLength alone must not exclude an allOf sibling's type.
-fn schema_type_match(schema: &Value, expected: &str) -> Option<bool> {
+fn schema_type_match(
+    root: &Value,
+    schema: &Value,
+    expected: &str,
+    depth: usize,
+    remaining: &mut usize,
+) -> Option<bool> {
+    // A branching reference cycle can expand exponentially even at bounded depth.
+    *remaining = remaining.checked_sub(1)?;
+    // Local references are common in strict tool schemas. Limit traversal so a
+    // cyclic definition cannot recurse indefinitely while deciding a type hint.
+    if depth > 16
+        || schema.get("$dynamicRef").is_some()
+        || schema.get("$recursiveRef").is_some()
+        || (schema.get("$id").is_some() && !std::ptr::eq(schema, root))
+    {
+        return None;
+    }
+    let reference_hint = schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|reference| resolve_local_schema_ref(reference, root))
+        .and_then(|target| schema_type_match(root, target, expected, depth + 1, remaining));
     let matches = |ty: &Value| {
         ty.as_str() == Some(expected) || (expected == "integer" && ty.as_str() == Some("number"))
     };
@@ -765,13 +789,18 @@ fn schema_type_match(schema: &Value, expected: &str) -> Option<bool> {
         ty.as_array()
             .map_or_else(|| matches(ty), |types| types.iter().any(matches))
     });
+    // Modern JSON Schema applies $ref siblings as additional constraints.
+    hint = match (hint, reference_hint) {
+        (Some(left), Some(right)) => Some(left && right),
+        (left, right) => left.or(right),
+    };
     for keyword in ["anyOf", "oneOf", "allOf"] {
         let Some(options) = schema.get(keyword).and_then(Value::as_array) else {
             continue;
         };
         let branches = options
             .iter()
-            .map(|option| schema_type_match(option, expected));
+            .map(|option| schema_type_match(root, option, expected, depth, remaining));
         let branch_hint = if keyword == "allOf" {
             branches.flatten().reduce(|left, right| left && right)
         } else {
@@ -867,12 +896,15 @@ fn parse_tool_call_block(
         }
     }
 
-    // Validate function against tools if provided
-    if let Some(tools_list) = tools {
-        let tool_exists = tools_list.iter().any(|t| t.name == function_name);
-        if !tool_exists {
-            anyhow::bail!("Function '{}' not found in available tools", function_name);
-        }
+    // Preserve unknown calls; executors must authorize names against request-scoped tools.
+    if let Some(tools_list) = tools
+        && !tools_list.iter().any(|t| t.name == function_name)
+    {
+        warn!(
+            function = %function_name,
+            why = "tool_not_in_request_tool_list",
+            "GLM-4.7 tool call references a function not in the request's tools list; passing it through"
+        );
     }
 
     Ok(ToolCallResponse {
@@ -891,6 +923,158 @@ mod tests {
 
     fn get_test_config() -> Glm47ParserConfig {
         Glm47ParserConfig::default()
+    }
+
+    #[test]
+    fn inline_unions_preserve_string_hints_within_node_budget() {
+        let mut parameter = serde_json::json!({"type": "string"});
+        for keyword in ["anyOf", "oneOf", "allOf"].into_iter().cycle().take(16) {
+            parameter = serde_json::json!({keyword: [parameter]});
+        }
+        let tools = vec![ToolDefinition {
+            name: "set_label".into(),
+            parameters: Some(null_ref_parameters(parameter)),
+            strict: None,
+        }];
+        let wire = "<tool_call>set_label<arg_key>label</arg_key><arg_value>{\"x\":1}</arg_value></tool_call>";
+        let (calls, _) = try_tool_call_parse_glm47(wire, &get_test_config(), Some(&tools)).unwrap();
+        let arguments: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        assert_eq!(arguments["label"], serde_json::json!("{\"x\":1}"));
+    }
+
+    #[test]
+    fn type_hints_bound_reference_depth() {
+        for (references, expected) in [(16, serde_json::json!(42)), (17, serde_json::json!("42"))] {
+            let mut definitions = serde_json::Map::new();
+            for index in 0..references {
+                definitions.insert(
+                    format!("step_{index}"),
+                    if index + 1 == references {
+                        serde_json::json!({"type": "integer"})
+                    } else {
+                        serde_json::json!({"$ref": format!("#/$defs/step_{}", index + 1)})
+                    },
+                );
+            }
+            let tools = vec![ToolDefinition {
+                name: "set_label".into(),
+                parameters: Some(serde_json::json!({
+                    "type": "object", "properties": {"label": {"$ref": "#/$defs/step_0"}},
+                    "$defs": definitions
+                })),
+                strict: None,
+            }];
+            let wire =
+                "<tool_call>set_label<arg_key>label</arg_key><arg_value>42</arg_value></tool_call>";
+            let (calls, _) =
+                try_tool_call_parse_glm47(wire, &get_test_config(), Some(&tools)).unwrap();
+            let arguments: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+            assert_eq!(arguments["label"], expected, "{references} references");
+        }
+    }
+
+    #[test]
+    fn branching_reference_cycles_exhaust_a_shared_budget() {
+        let reference = serde_json::json!({"$ref": "#/$defs/Cycle"});
+        let schema = serde_json::json!({
+            "$defs": {"Cycle": {"anyOf": vec![reference.clone(); 8]}},
+            "properties": {"value": reference}
+        });
+        let mut remaining = 64;
+        assert_eq!(
+            schema_type_match(
+                &schema,
+                &schema["properties"]["value"],
+                "string",
+                0,
+                &mut remaining
+            ),
+            None
+        );
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn referenced_types_intersect_siblings_and_bound_cycles() {
+        let schema = serde_json::json!({
+            "$defs": {
+                "Scalar": {"type": ["string", "integer"]},
+                "postal code": {"type": "integer"},
+                "café+": {"type": "integer"},
+                "a/b~c": {"type": "integer"},
+                "Text": {"type": "string"},
+                "Nullable": {"type": ["string", "null"]},
+                "Numbers": {"type": ["integer", "number"]},
+                "NumbersReverse": {"type": ["number", "integer"]},
+                "NumberOrBoolean": {"anyOf": [{"type": "number"}, {"type": "boolean"}]},
+                "Alias": {"$ref": "#/$defs/postal%20code"},
+                "Scoped": {
+                    "$id": "https://example.com/scoped",
+                    "$defs": {"postal code": {"type": "string"}},
+                    "$ref": "#/$defs/postal%20code"
+                },
+                "Dynamic": {"$dynamicRef": "#/$defs/postal%20code"},
+                "Recursive": {"$recursiveRef": "#"},
+                "Loop": {"$ref": "#/$defs/Loop"}
+            },
+            "properties": {
+                "narrow": {"$ref": "#/$defs/Scalar", "type": "integer"},
+                "encoded": {"$ref": "#/$defs/postal%20code"},
+                "utf8": {"$ref": "#/$defs/caf%c3%a9+"},
+                "invalid_utf8": {"$ref": "#/$defs/%FF"},
+                "incomplete": {"$ref": "#/$defs/%2"},
+                "invalid_hex": {"$ref": "#/$defs/%GG"},
+                "escaped": {"$ref": "#/$defs/a%7E1b%7E0c"},
+                "cycle": {"$ref": "#/$defs/Loop"},
+                "typed_cycle": {"$ref": "#/$defs/Loop", "type": "integer"},
+                "payload": {"$ref": "#/$defs/Text"},
+                "nullable": {"$ref": "#/$defs/Nullable"},
+                "literal_null": {"$ref": "#/$defs/Text"},
+                "integer_first": {"$ref": "#/$defs/Numbers"},
+                "number_first": {"$ref": "#/$defs/NumbersReverse"},
+                "bool_union": {"$ref": "#/$defs/NumberOrBoolean"},
+                "allof_narrow": {"$ref": "#/$defs/Scalar", "allOf": [{"type": "integer"}]},
+                "chain": {"$ref": "#/$defs/Alias"},
+                "scoped": {"$ref": "#/$defs/Scoped"},
+                "dynamic": {"$ref": "#/$defs/Dynamic"},
+                "recursive": {"$ref": "#/$defs/Recursive"}
+            }
+        });
+        for (field, raw, expected) in [
+            ("narrow", "42", serde_json::json!(42)),
+            ("encoded", "42", serde_json::json!(42)),
+            ("utf8", "42", serde_json::json!(42)),
+            ("invalid_utf8", "42", serde_json::json!("42")),
+            ("incomplete", "42", serde_json::json!("42")),
+            ("invalid_hex", "42", serde_json::json!("42")),
+            ("escaped", "42", serde_json::json!(42)),
+            ("cycle", "42", serde_json::json!("42")),
+            ("typed_cycle", "42", serde_json::json!(42)),
+            ("payload", "{\"x\":1}", serde_json::json!("{\"x\":1}")),
+            ("nullable", "null", serde_json::json!(null)),
+            ("literal_null", "null", serde_json::json!("null")),
+            ("integer_first", "3.5", serde_json::json!(3.5)),
+            ("number_first", "42", serde_json::json!(42)),
+            ("bool_union", "true", serde_json::json!(true)),
+            ("allof_narrow", "42", serde_json::json!(42)),
+            ("chain", "42", serde_json::json!(42)),
+            ("scoped", "42", serde_json::json!("42")),
+            ("dynamic", "42", serde_json::json!("42")),
+            ("recursive", "42", serde_json::json!("42")),
+        ] {
+            let tools = vec![ToolDefinition {
+                name: "capture_payload".into(),
+                strict: None,
+                parameters: Some(schema.clone()),
+            }];
+            let input = format!(
+                "<tool_call>capture_payload<arg_key>{field}</arg_key><arg_value>{raw}</arg_value></tool_call>"
+            );
+            let (calls, _) =
+                try_tool_call_parse_glm47(&input, &get_test_config(), Some(&tools)).unwrap();
+            let args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+            assert_eq!(args[field], expected, "{field}");
+        }
     }
 
     fn parse_null_with_parameters(parameters: Value) -> Value {
@@ -1496,9 +1680,9 @@ mod tests {
         assert_eq!(calls[1].function.name, "get_time");
     }
 
-    // DEPRECATED(parser-fixture-duplicate): Duplicate of YAML fixture coverage: TOOLCALLING.batch.8.c, TOOLCALLING.batch.13 in tests/parity/toolcalling/fixtures/glm47/TOOLCALLING.batch.13.yaml, tests/parity/toolcalling/fixtures/glm47/TOOLCALLING.batch.8.yaml.
-    #[test] // TOOLCALLING.batch.4, TOOLCALLING.batch.8
-    fn test_unparseable_block_dropped_no_tag_leak() {
+    // Fixture coverage: glm47/TOOLCALLING.batch.yaml (TOOLCALLING.batch.13).
+    #[test]
+    fn test_unknown_function_block_returned_as_call_no_tag_leak() {
         let config = get_test_config();
         let tools = vec![ToolDefinition {
             name: "get_weather".to_string(),
@@ -1506,27 +1690,53 @@ mod tests {
             strict: None,
         }];
 
-        // Tool call block references a function not in the tools list — the
-        // whole block (including <tool_call>...<arg_key>...<arg_value>... wire
-        // markup) must be dropped, not leaked through normal_text.
         let message = "Here is the result: <tool_call>unknown_func<arg_key>x</arg_key><arg_value>1</arg_value></tool_call> done";
         let (calls, normal_text) =
             try_tool_call_parse_glm47(message, &config, Some(&tools)).unwrap();
 
-        assert_eq!(calls.len(), 0);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "unknown_func");
+        let args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        assert_eq!(args, serde_json::json!({"x": "1"}));
         let text = normal_text.unwrap();
-        assert!(
-            !text.contains("unknown_func"),
-            "Unparseable block must be dropped to avoid tag leakage, got: {text}"
-        );
         assert!(
             !text.contains("<tool_call>") && !text.contains("<arg_key>"),
             "Wire-format tags must not leak into normal_text, got: {text}"
         );
         assert!(
-            text.contains("Here is the result:") && text.contains("done"),
-            "Surrounding prose must be preserved, got: {text}"
+            text.contains("Here is the result:"),
+            "Leading prose must survive, got: {text}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_public_dispatch_preserves_mixed_unknown_and_known_calls() {
+        let tools = vec![ToolDefinition {
+            name: "known_func".to_string(),
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {"x": {"type": "integer"}}
+            })),
+            strict: None,
+        }];
+        let message = "<tool_call>unknown_func<arg_key>x</arg_key><arg_value>1</arg_value></tool_call><tool_call>known_func<arg_key>x</arg_key><arg_value>2</arg_value></tool_call>";
+        let (calls, normal_text) =
+            crate::tool_calling::parsers::detect_and_parse_tool_call_with_recovery(
+                message,
+                Some("glm47"),
+                Some(&tools),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].function.name, "unknown_func");
+        assert_eq!(calls[1].function.name, "known_func");
+        let unknown_args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        let known_args: Value = serde_json::from_str(&calls[1].function.arguments).unwrap();
+        assert_eq!(unknown_args, serde_json::json!({"x": "1"}));
+        assert_eq!(known_args, serde_json::json!({"x": 2}));
+        assert!(normal_text.unwrap_or_default().trim().is_empty());
     }
 
     #[test] // helper
