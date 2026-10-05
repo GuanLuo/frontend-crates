@@ -756,7 +756,6 @@ mod tests {
         let qwen = "{%- if add_generation_prompt -%}<|im_start|>assistant\n<think>\n{%- endif -%}";
         assert!(!is_minimax_m2_template_source(qwen));
         assert_eq!(normalize_chat_template_source(qwen), qwen);
-        // Adapting a non-matching source is a no-op.
         assert_eq!(adapt_minimax_m2_thinking_template_source(qwen), qwen);
     }
 
