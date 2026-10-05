@@ -97,6 +97,8 @@ where
 #[builder(setter(into, strip_option), default)]
 #[builder(derive(Debug))]
 #[builder(build_fn(error = "OpenAIError"))]
+#[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::completion::CreateCompletionRequest))]
 pub struct CreateCompletionRequest {
     pub model: String,
     pub prompt: Prompt,
