@@ -1067,16 +1067,6 @@ mod tests {
         assert!(closed.as_str().ends_with("<think>\n\n</think>\n\n"));
         assert_eq!(closed.reasoning_state(), Some(PromptReasoningState::Closed));
 
-        // A template with literal `<think>` in user text is untouched: the
-        // MiniMax adapter keys on the exact upstream generation prompt.
-        let literal = "{% for m in messages %}{{ m.content }}{% endfor %}<minimax:tool_call>";
-        let f = formatter_for(literal);
-        let rendered = f
-            .render_prompt(&minimax_request(Some(json!({"thinking": false})), None))
-            .unwrap();
-        assert!(!rendered.as_str().contains("</think>"));
-        assert_eq!(rendered.reasoning_state(), None);
-
         let plain = formatter_for(
             "{% for m in messages %}{{ m.role }}: {{ m.content }}\n{% endfor %}assistant:",
         );

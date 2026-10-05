@@ -752,7 +752,6 @@ mod tests {
         );
         assert!(!is_minimax_m2_template_source(&custom));
         assert_eq!(normalize_chat_template_source(&custom), custom);
-        // Generic `<think>` templates are left alone.
         let qwen = "{%- if add_generation_prompt -%}<|im_start|>assistant\n<think>\n{%- endif -%}";
         assert!(!is_minimax_m2_template_source(qwen));
         assert_eq!(normalize_chat_template_source(qwen), qwen);
