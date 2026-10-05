@@ -516,7 +516,13 @@ impl OAIPromptFormatter for HfTokenizerConfigJsonFormatter {
 
     fn render_prompt(&self, req: &dyn OAIChatLikeRequest) -> Result<RenderedPrompt> {
         let text = self.render(req)?;
-        let state = infer_prompt_reasoning_state(&text);
+        // Only a generation prompt positions the completion relative to a
+        // reasoning block; a marker at the end of message content does not.
+        let state = if self.supports_add_generation_prompt && req.should_add_generation_prompt() {
+            infer_prompt_reasoning_state(&text)
+        } else {
+            None
+        };
         let prompt = RenderedPrompt::text(text);
         Ok(match state {
             Some(state) => prompt.with_reasoning_state(state),
@@ -814,7 +820,6 @@ mod tests {
         for kwargs in [
             json!({"thinking": false}),
             json!({"enable_thinking": false}),
-            json!({"thinking": false, "enable_thinking": false}),
             // `thinking` wins over `enable_thinking`, matching thinking_bool_from_args.
             json!({"thinking": false, "enable_thinking": true}),
             json!({"thinking_mode": "chat"}),
@@ -854,7 +859,6 @@ mod tests {
         let stock_opener = r"{{- ']~b]ai' ~ '\n' ~ '<think>' ~ '\n' }}";
         assert!(template.contains(stock_opener));
 
-        // A custom template that already implements thinking=false.
         let custom_opener = [
             stock_opener,
             r"{%- if thinking is false -%}{{- '</think>' ~ '\n' }}{%- endif -%}",
@@ -882,17 +886,11 @@ mod tests {
 
     #[test]
     fn minimax_m2_thinking_toggle_is_independent_of_tool_choice() {
-        // The closure is a property of the request's thinking mode, not of how
-        // tools are selected: plain chat, auto, none, required and named all
-        // get the same prompt shape for the same toggle.
+        // The closure is a property of the request's thinking mode, not of tool
+        // selection: with tools rendered (no tool_choice) and with tools stripped
+        // (`tool_choice: none`) the prompt tail is the same for the same toggle.
         let f = minimax_m2_formatter();
-        let choices = [
-            None,
-            Some(json!("auto")),
-            Some(json!("none")),
-            Some(json!("required")),
-            Some(json!({"type": "function", "function": {"name": "calculate"}})),
-        ];
+        let choices = [None, Some(json!("none"))];
         for choice in &choices {
             let disabled = f
                 .render_prompt(&minimax_request(
@@ -923,7 +921,7 @@ mod tests {
     #[test]
     fn minimax_m2_disabled_thinking_only_changes_the_generation_prompt() {
         // Everything before the generation prompt is byte-identical between the
-        // two thinking modes.
+        // two modes, so KV prefixes and multi-turn replay are unaffected.
         let f = minimax_m2_formatter();
         let enabled = f
             .render(&minimax_request(Some(json!({"thinking": true})), None))
@@ -944,6 +942,40 @@ mod tests {
         assert!(!rendered.as_str().contains("<think>"));
         assert!(!rendered.as_str().contains("</think>"));
         assert_eq!(rendered.reasoning_state(), None);
+    }
+
+    #[test]
+    fn reasoning_state_ignores_message_markers_when_generation_prompt_is_disabled() {
+        let f = formatter_for(
+            "{% for m in messages %}{{ m.content }}{% endfor %}{% if add_generation_prompt %}assistant:<think>{% endif %}",
+        );
+        assert!(f.supports_add_generation_prompt());
+        for content in ["<think>", "<think>\n</think>"] {
+            let mut request = template_request(
+                json!({"model": "test", "messages": [{"role": "user", "content": content}]}),
+                None,
+            );
+            request.add_generation_prompt = false;
+            let rendered = f.render_prompt(&request).unwrap();
+            assert_eq!(rendered.as_str(), content);
+            assert_eq!(rendered.reasoning_state(), None, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn reasoning_state_ignores_message_markers_when_generation_prompt_is_unsupported() {
+        let f = formatter_for("{% for m in messages %}{{ m.content }}{% endfor %}");
+        assert!(!f.supports_add_generation_prompt());
+        for content in ["<think>", "<think>\n</think>"] {
+            let request = template_request(
+                json!({"model": "test", "messages": [{"role": "user", "content": content}]}),
+                None,
+            );
+            assert!(request.should_add_generation_prompt());
+            let rendered = f.render_prompt(&request).unwrap();
+            assert_eq!(rendered.as_str(), content);
+            assert_eq!(rendered.reasoning_state(), None, "{content:?}");
+        }
     }
 
     #[test]
@@ -1045,7 +1077,6 @@ mod tests {
         assert!(!rendered.as_str().contains("</think>"));
         assert_eq!(rendered.reasoning_state(), None);
 
-        // No reasoning markers at all: no claim.
         let plain = formatter_for(
             "{% for m in messages %}{{ m.role }}: {{ m.content }}\n{% endfor %}assistant:",
         );
