@@ -33,14 +33,27 @@ endpoint families are outside this initial schema surface.
 struct Contract;
 ```
 
-Owned components use a `dynamo_protocols` namespace. Fields whose types are
-owned by `async-openai` reference schema-only `async_openai.*` import slots,
-each marked with `x-dynamo-schema-import` containing the crate and Rust type
-name. These slots deliberately do not claim detailed upstream schemas. They
-accept non-null JSON values; the owning `Option<T>` supplies nullability.
-Consumers must resolve the markers against version-aligned upstream schema
-definitions before claiming complete coverage. This crate does not perform
-that composition, and an unresolved slot is not evidence of compatibility.
+The export describes types defined in this crate. When a field uses a type
+from `async-openai` that has no schema support, the export keeps the field but
+uses a placeholder for its type. For example, a completion request describes
+`model` as a string, but leaves the detailed definition of `prompt` as a
+placeholder for async-openai's `Prompt` type.
+
+Before comparing that field with another server, a separate tool must fill in
+the missing definition using an upstream specification checked against the
+async-openai version in use. This crate does not do that step. Until the
+definition is filled in, the field's compatibility is unknown, not confirmed.
+
+In the OpenAPI document, definitions from this crate have names beginning with
+`dynamo_protocols.`; upstream placeholders use `async_openai.`. These names do
+not change the JSON request or response format. Each placeholder has an
+`x-dynamo-schema-import` marker identifying the upstream crate and Rust type,
+so a separate tool can find the definition to supply.
+
+The placeholder itself allows any non-null JSON value rather than guessing the
+missing type's rules. For an `Option<T>` field, the generated schema also allows
+null. This is only a limitation of the exported schema: the server still parses
+the field using its real Rust type and can reject values the placeholder allows.
 
 Installing a future upstream release with schema support will not automatically
 replace these explicit `value_type` overrides. Native upstream support requires
