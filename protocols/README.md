@@ -8,13 +8,13 @@ Request/response types for OpenAI- and Anthropic-compatible inference servers. B
 - **Batch API** — re-exported from upstream.
 - **Files API** — re-exported from upstream.
 - **Responses API** — input chain owned (relaxed for Codex / Agents SDK); output chain re-exported from upstream.
-- **Completions** — re-exported.
+- **Completions** — locally owned request; response types re-exported from upstream.
 - **Anthropic Messages** — fully owned (no upstream equivalent).
 - **Embeddings**, **Images** — re-exported.
 
 ## Optional protocol schemas
 
-The opt-in `protocol-schema` feature supplies utoipa 5 `ToSchema`
+The `protocol-schema` feature is disabled by default. When enabled, it supplies utoipa 5 `ToSchema`
 implementations for locally owned chat/completion requests, chat responses,
 chat stream chunks, and their locally owned nested types. It uses the released
 `async-openai` dependency without requiring an upstream schema feature or Git
@@ -48,13 +48,37 @@ compatible trait versions, Cargo feature wiring, and switching the annotations
 away from import slots. This follow-up is tracked in
 [#351](https://github.com/ai-dynamo/frontend-crates/issues/351).
 
-The schemas describe canonical typed/serialized forms, **not a complete
-input-validation contract**. Custom deserializers additionally accept input
-aliases (`reasoning`), object-valued function arguments, media shorthand,
-tools-only system messages, and null stream-option booleans. Some input
-combinations are rejected by role-specific validation. These behaviors still
-need explicit coverage when using the schemas for compatibility assessment;
-a schema comparison alone must not label them equivalent.
+### Current coverage limits
+
+Enabling the feature does not provide a complete schema for every protocol in
+this crate. The following are not currently covered:
+
+- **Detailed upstream type definitions.** Imported types such as `Prompt`,
+  `FunctionObject`, `ResponseFormat`, and `CompletionUsage` remain marked import
+  slots, not detailed schemas. Their nested fields, enum alternatives, and
+  constraints require external resolution as described above. A resolved local
+  `$ref` can still point to an incomplete import slot.
+- **Wholly re-exported completion responses.** `CreateCompletionResponse` does
+  not gain `ToSchema` from this feature. Completion request coverage must not be
+  interpreted as completion response or streaming-response coverage.
+- **Other protocol families and errors.** Responses, Anthropic Messages, Batch,
+  Files, Embeddings, Images, and Realtime do not have schema exports through
+  this feature. It also does not define server error-response contracts.
+- **The full accepted-input contract.** The schemas describe canonical
+  typed/serialized forms, not every custom deserializer path. Input aliases
+  (`reasoning`), object-valued function arguments, media shorthand, tools-only
+  system messages, and null stream-option booleans can normalize before
+  serialization. Role-specific validation can reject other combinations.
+  These differences need separate coverage; the generated schema is not a
+  drop-in replacement for request deserialization or validation.
+- **Contents of arbitrary JSON fields.** Fields such as `mm_processor_kwargs`
+  expose their declared container shape, not backend/model-specific keys or
+  semantics. Their presence in the schema does not establish backend support.
+- **HTTP and runtime behavior.** Component schemas do not define endpoint
+  registration, HTTP status/header behavior, SSE framing, chunk ordering or
+  termination, conditional field emission, or backend handling. Even where a
+  chunk or response type has a schema, actual serving behavior needs separate
+  conformance tests. Schema agreement alone is not proof of server parity.
 
 Run `cargo test -p dynamo-protocols --features protocol-schema` to exercise
 schema generation and existing protocol tests.
