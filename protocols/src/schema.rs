@@ -1,12 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Explicit import slots for unannotated async-openai types.
+//! Schema-only placeholders for async-openai types that lack schema support.
 //!
-//! These are schema-only stand-ins, never runtime protocol types. Consumers
-//! must resolve every `x-dynamo-schema-import` using a version-aligned OpenAI
-//! specification before claiming complete schema coverage. The raw export is
-//! deliberately marked rather than claiming that an arbitrary object is valid.
+//! These placeholders let Dynamo-owned types derive `ToSchema` without
+//! requiring `async-openai/protocol-schema`. Field-level `schema(value_type = ...)`
+//! annotations select them for schema generation only; runtime field types and
+//! Serde behavior remain unchanged.
+//!
+//! Each placeholder preserves the upstream type's identity through an
+//! `x-dynamo-schema-import` marker, but does not describe its detailed shape.
+//! Consumers must resolve these markers against version-aligned upstream
+//! schemas before claiming complete coverage. This module does not perform
+//! that resolution or merge specifications.
+//!
+//! Once native upstream schema support is integrated, the corresponding
+//! placeholders and field overrides can be removed.
 
 macro_rules! imports {
     ($($name:ident),* $(,)?) => {$(
