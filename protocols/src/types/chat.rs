@@ -264,6 +264,7 @@ pub struct ChatCompletionMessageToolCallChunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::FunctionType>))]
     pub r#type: Option<FunctionType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<FunctionCallStream>,
@@ -313,6 +314,7 @@ pub struct ChatCompletionRequestMessageContentPartImage {
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ImageUrl))]
 pub struct ImageUrl {
     pub url: Url,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ImageDetail>))]
     pub detail: Option<ImageDetail>,
     #[deprecated(note = "use the content-part `uuid` field for vLLM cache identities")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -330,6 +332,7 @@ pub struct ImageUrl {
 #[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestToolMessageContentPart))]
 pub enum ChatCompletionRequestToolMessageContentPart {
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestMessageContentPartText))]
     Text(ChatCompletionRequestMessageContentPartText),
     ImageUrl(ChatCompletionRequestMessageContentPartImage),
     VideoUrl(ChatCompletionRequestMessageContentPartVideo),
@@ -400,6 +403,7 @@ pub struct ChatCompletionTokenLogprob {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_id: Option<u32>,
     pub bytes: Option<Vec<u8>>,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Vec<crate::schema::TopLogprobs>))]
     pub top_logprobs: Vec<TopLogprobs>,
 }
 
@@ -442,6 +446,7 @@ fn default_function_type() -> FunctionType {
 pub struct ChatCompletionMessageToolCall {
     pub id: String,
     #[serde(default = "default_function_type")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::FunctionType))]
     pub r#type: FunctionType,
     pub function: FunctionCall,
 }
@@ -463,9 +468,13 @@ pub enum ChatCompletionToolChoiceOption {
 #[cfg(feature = "protocol-schema")]
 impl utoipa::PartialSchema for ChatCompletionToolChoiceOption {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
-        use utoipa::openapi::schema::AnyOfBuilder;
+        use utoipa::openapi::schema::{AnyOfBuilder, ObjectBuilder, Type};
         AnyOfBuilder::new()
-            .item(async_openai::types::chat::ToolChoiceOptions::schema())
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(Type::String)
+                    .enum_values(Some(["none", "auto", "required"])),
+            )
             .item(ChatCompletionNamedToolChoice::schema())
             .into()
     }
@@ -478,7 +487,6 @@ impl utoipa::ToSchema for ChatCompletionToolChoiceOption {
     }
 
     fn schemas(schemas: &mut Vec<(String, utoipa::openapi::RefOr<utoipa::openapi::Schema>)>) {
-        async_openai::types::chat::ToolChoiceOptions::schemas(schemas);
         ChatCompletionNamedToolChoice::schemas(schemas);
     }
 }
@@ -494,6 +502,7 @@ impl utoipa::ToSchema for ChatCompletionToolChoiceOption {
 pub struct ChatCompletionTool {
     #[builder(default = "ChatCompletionToolType::Function")]
     pub r#type: ChatCompletionToolType,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::FunctionObject))]
     pub function: FunctionObject,
 }
 
@@ -658,6 +667,7 @@ pub enum ChatCompletionMessageContent {
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::VideoUrl))]
 pub struct VideoUrl {
     pub url: Url,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ImageDetail>))]
     pub detail: Option<ImageDetail>,
     #[deprecated(note = "use the content-part `uuid` field for vLLM cache identities")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -778,10 +788,12 @@ impl From<Vec<ChatCompletionRequestUserMessageContentPart>>
 #[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestUserMessageContentPart))]
 pub enum ChatCompletionRequestUserMessageContentPart {
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestMessageContentPartText))]
     Text(ChatCompletionRequestMessageContentPartText),
     ImageUrl(ChatCompletionRequestMessageContentPartImage),
     VideoUrl(ChatCompletionRequestMessageContentPartVideo),
     AudioUrl(ChatCompletionRequestMessageContentPartAudioUrl),
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestMessageContentPartAudio))]
     InputAudio(ChatCompletionRequestMessageContentPartAudio),
 }
 
@@ -812,6 +824,7 @@ pub enum ChatCompletionRequestUserMessageContentPart {
 #[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestSystemMessage))]
 pub struct ChatCompletionRequestSystemMessage {
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestSystemMessageContent))]
     pub content: ChatCompletionRequestSystemMessageContent,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -899,6 +912,7 @@ impl<'de> Deserialize<'de> for ChatCompletionRequestSystemMessage {
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestAssistantMessage))]
 pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionRequestAssistantMessageContent>))]
     pub content: Option<ChatCompletionRequestAssistantMessageContent>,
     /// Reasoning content from a previous assistant turn.
     /// Accept both `reasoning_content` (DeepSeek /
@@ -912,6 +926,7 @@ pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionRequestAssistantMessageAudio>))]
     pub audio: Option<ChatCompletionRequestAssistantMessageAudio>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
@@ -938,11 +953,13 @@ pub struct ChatCompletionRequestAssistantMessage {
 #[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestMessage))]
 pub enum ChatCompletionRequestMessage {
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestDeveloperMessage))]
     Developer(ChatCompletionRequestDeveloperMessage),
     System(ChatCompletionRequestSystemMessage),
     User(ChatCompletionRequestUserMessage),
     Assistant(ChatCompletionRequestAssistantMessage),
     Tool(ChatCompletionRequestToolMessage),
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::ChatCompletionRequestFunctionMessage))]
     Function(ChatCompletionRequestFunctionMessage),
 }
 
@@ -1073,11 +1090,13 @@ pub struct ChatCompletionResponseMessage {
     pub refusal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = crate::schema::Role))]
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[deprecated]
     pub function_call: Option<FunctionCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionResponseMessageAudio>))]
     pub audio: Option<ChatCompletionResponseMessageAudio>,
     /// Reasoning content produced by the model (DeepSeek-R1, QwQ).
     /// Accepts either `reasoning_content` (DeepSeek / SGLang / TRT-LLM
@@ -1154,18 +1173,23 @@ pub struct CreateChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<Vec<crate::schema::ResponseModalities>>))]
     pub modalities: Option<Vec<async_openai::types::chat::ResponseModalities>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::PredictionContent>))]
     pub prediction: Option<PredictionContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionAudio>))]
     pub audio: Option<ChatCompletionAudio>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ResponseFormat>))]
     pub response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ServiceTier>))]
     pub service_tier: Option<ServiceTier>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Stop>,
@@ -1197,11 +1221,14 @@ pub struct CreateChatCompletionRequest {
     pub prompt_cache_key: Option<String>,
     #[deprecated]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionFunctionCall>))]
     pub function_call: Option<ChatCompletionFunctionCall>,
     #[deprecated]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<Vec<crate::schema::ChatCompletionFunctions>>))]
     pub functions: Option<Vec<ChatCompletionFunctions>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::WebSearchOptions>))]
     pub web_search_options: Option<WebSearchOptions>,
 }
 
@@ -1279,6 +1306,7 @@ pub fn dynamic_tool_name(tool: &serde_json::Value) -> Option<&str> {
 pub struct ChatChoice {
     pub index: u32,
     pub message: ChatCompletionResponseMessage,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::FinishReason>))]
     pub finish_reason: Option<FinishReason>,
     pub logprobs: Option<ChatChoiceLogprobs>,
 }
@@ -1371,6 +1399,7 @@ pub struct CreateChatCompletionResponse {
     pub created: u32,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ServiceTier>))]
     pub service_tier: Option<ServiceTierResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
@@ -1379,6 +1408,7 @@ pub struct CreateChatCompletionResponse {
         skip_serializing_if = "Option::is_none",
         serialize_with = "serialize_usage_omitting_absent"
     )]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::CompletionUsage>))]
     pub usage: Option<CompletionUsage>,
 }
 
@@ -1401,6 +1431,7 @@ pub struct ChatCompletionStreamResponseDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCallChunk>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::Role>))]
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
@@ -1434,6 +1465,7 @@ pub struct ChatCompletionStreamResponseDeltaFunctionCall {
 pub struct ChatChoiceStream {
     pub index: u32,
     pub delta: ChatCompletionStreamResponseDelta,
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::FinishReason>))]
     pub finish_reason: Option<FinishReason>,
     pub logprobs: Option<ChatChoiceLogprobs>,
 }
@@ -1454,6 +1486,7 @@ pub struct CreateChatCompletionStreamResponse {
     pub created: u32,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ServiceTier>))]
     pub service_tier: Option<ServiceTierResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
@@ -1462,6 +1495,7 @@ pub struct CreateChatCompletionStreamResponse {
         skip_serializing_if = "Option::is_none",
         serialize_with = "serialize_usage_omitting_absent"
     )]
+    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::CompletionUsage>))]
     pub usage: Option<CompletionUsage>,
 }
 

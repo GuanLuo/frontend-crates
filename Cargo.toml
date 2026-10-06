@@ -21,8 +21,7 @@ repository = "https://github.com/ai-dynamo/frontend-crates.git"
 [workspace.dependencies]
 aho-corasick = "1"
 anyhow = "1"
-# Temporary schema-support revision; replace with an upstream release before publishing.
-async-openai = { version = "0.42", git = "https://github.com/GuanLuo/async-openai", rev = "c9166cbf81d427f8d2ebb10828b027e20855e193", default-features = false }
+async-openai = { version = "0.42", default-features = false }
 async-stream = "0.3"
 axum = "0.8"
 base64 = "0.22"

@@ -13,10 +13,7 @@ use utoipa::{OpenApi, ToSchema};
     CreateChatCompletionRequest,
     CreateCompletionRequest,
     CreateChatCompletionResponse,
-    CreateChatCompletionStreamResponse,
-    CreateCompletionResponse,
-    async_openai::types::chat::CreateChatCompletionRequest,
-    async_openai::types::chat::CreateChatCompletionResponse
+    CreateChatCompletionStreamResponse
 )))]
 struct Contract;
 
@@ -42,9 +39,9 @@ fn canonical<T: ToSchema + DeserializeOwned + Serialize>(input: Value) {
 fn request_roots_are_distinct_from_upstream_and_have_real_fields() {
     let doc = document();
     let schemas = &doc["components"]["schemas"];
-    assert_ne!(
+    assert_eq!(
         CreateChatCompletionRequest::name(),
-        async_openai::types::chat::CreateChatCompletionRequest::name()
+        "dynamo_protocols.chat.CreateChatCompletionRequest"
     );
     let own = &schemas[CreateChatCompletionRequest::name().as_ref()];
     assert!(own["properties"].get("messages").is_some());
@@ -84,6 +81,29 @@ fn component_graph_resolves_every_reference() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn unannotated_dependency_types_are_explicit_import_slots() {
+    let doc = document();
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    for (name, schema) in schemas {
+        if let Some(short) = name.strip_prefix("async_openai.") {
+            assert_eq!(schema["x-dynamo-schema-import"]["crate"], "async-openai");
+            assert_eq!(schema["x-dynamo-schema-import"]["type"], short);
+            let kinds = schema["type"].as_array().unwrap();
+            assert!(
+                !kinds.contains(&json!("null")),
+                "Option<T> owns nullability"
+            );
+            assert!(
+                kinds.len() > 1,
+                "must not fabricate an object-only contract"
+            );
+        }
+    }
+    assert!(schemas.contains_key("async_openai.Prompt"));
+    assert!(schemas.contains_key("async_openai.FunctionObject"));
 }
 
 #[test]

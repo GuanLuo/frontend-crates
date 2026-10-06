@@ -164,14 +164,14 @@ dependencies = [
 [[package]]
 name = "async-openai"
 version = "0.42.1"
-source = "git+https://github.com/GuanLuo/async-openai?rev=c9166cbf81d427f8d2ebb10828b027e20855e193#c9166cbf81d427f8d2ebb10828b027e20855e193"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63077bf55857e6963effefb5f28134c40cc2ee68bc176cc601bbdeb070017fba"
 dependencies = [
  "bytes",
  "derive_builder",
  "getrandom 0.3.4",
  "serde",
  "serde_json",
- "utoipa",
 ]
 
 [[package]]

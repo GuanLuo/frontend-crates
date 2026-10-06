@@ -1,6 +1,6 @@
 # dynamo-protocols
 
-Request/response types for OpenAI- and Anthropic-compatible inference servers. Built on [`async-openai`](https://crates.io/crates/async-openai) v0.34, with selective overrides where inference engines need behaviors upstream doesn't support.
+Request/response types for OpenAI- and Anthropic-compatible inference servers. Built on [`async-openai`](https://crates.io/crates/async-openai) v0.42, with selective overrides where inference engines need behaviors upstream doesn't support.
 
 ## What's included
 
@@ -15,10 +15,12 @@ Request/response types for OpenAI- and Anthropic-compatible inference servers. B
 ## Optional protocol schemas
 
 The opt-in `protocol-schema` feature supplies utoipa 5 `ToSchema`
-implementations for chat/completion requests, responses, stream chunks, and
-their reachable nested types. It forwards the schema feature to
-`async-openai`; it does not enable an HTTP client or change Serde behavior.
-Other endpoint families are outside this initial schema surface.
+implementations for locally owned chat/completion requests, chat responses,
+chat stream chunks, and their locally owned nested types. It uses the released
+`async-openai` dependency without requiring an upstream schema feature or Git
+override. It does not enable an HTTP client or change Serde behavior.
+Wholly re-exported types (including `CreateCompletionResponse`) and other
+endpoint families are outside this initial schema surface.
 
 ```rust,ignore
 #[derive(utoipa::OpenApi)]
@@ -31,8 +33,21 @@ Other endpoint families are outside this initial schema surface.
 struct Contract;
 ```
 
-Owned components use a `dynamo_protocols` namespace, so upstream
-`async_openai` types can coexist in the same document without name collisions.
+Owned components use a `dynamo_protocols` namespace. Fields whose types are
+owned by `async-openai` reference schema-only `async_openai.*` import slots,
+each marked with `x-dynamo-schema-import` containing the crate and Rust type
+name. These slots deliberately do not claim detailed upstream schemas. They
+accept non-null JSON values; the owning `Option<T>` supplies nullability.
+Consumers must resolve the markers against version-aligned upstream schema
+definitions before claiming complete coverage. This crate does not perform
+that composition, and an unresolved slot is not evidence of compatibility.
+
+Installing a future upstream release with schema support will not automatically
+replace these explicit `value_type` overrides. Native upstream support requires
+compatible trait versions, Cargo feature wiring, and switching the annotations
+away from import slots. This follow-up is tracked in
+[#351](https://github.com/ai-dynamo/frontend-crates/issues/351).
+
 The schemas describe canonical typed/serialized forms, **not a complete
 input-validation contract**. Custom deserializers additionally accept input
 aliases (`reasoning`), object-valued function arguments, media shorthand,
