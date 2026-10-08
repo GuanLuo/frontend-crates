@@ -47,12 +47,34 @@ pub use async_openai::types::chat::{
 /// display format for logprobs.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(untagged)]
-#[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::Stop))]
 pub enum Stop {
     String(String),
     StringArray(Vec<String>),
     TokenIdArray(Vec<u32>),
+}
+
+// Use anyOf because an empty array matches both array variants.
+// This is a schema-only correction; Serde parsing and Dynamo's
+// stop handling remain unchanged.
+#[cfg(feature = "protocol-schema")]
+impl utoipa::PartialSchema for Stop {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
+        utoipa::openapi::schema::AnyOfBuilder::new()
+            .description(Some(
+                "OpenAI stop configuration, with Dynamo's token-id stop extension.",
+            ))
+            .item(String::schema())
+            .item(Vec::<String>::schema())
+            .item(Vec::<u32>::schema())
+            .into()
+    }
+}
+
+#[cfg(feature = "protocol-schema")]
+impl utoipa::ToSchema for Stop {
+    fn name() -> std::borrow::Cow<'static, str> {
+        "dynamo_protocols.chat.Stop".into()
+    }
 }
 
 impl Stop {
@@ -1083,10 +1105,12 @@ pub struct ChatCompletionResponseMessage {
     /// Always serialized (as `null` when None) so clients can rely on the
     /// `content` key being present alongside `reasoning_content` or
     /// `tool_calls`. Matches the upstream OpenAI API shape (DGH-651).
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub content: Option<ChatCompletionMessageContent>,
     /// Always serialized (as `null` when None): the spec marks `refusal` as
     /// required-and-nullable, and OpenAI emits `"refusal": null` on every
     /// non-refusal response.
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub refusal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
@@ -1306,8 +1330,10 @@ pub fn dynamic_tool_name(tool: &serde_json::Value) -> Option<&str> {
 pub struct ChatChoice {
     pub index: u32,
     pub message: ChatCompletionResponseMessage,
-    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::FinishReason>))]
+    // These keys are always serialized, including explicit nulls.
+    #[cfg_attr(feature = "protocol-schema", schema(required, value_type = Option<crate::schema::FinishReason>))]
     pub finish_reason: Option<FinishReason>,
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub logprobs: Option<ChatChoiceLogprobs>,
 }
 
@@ -1465,8 +1491,10 @@ pub struct ChatCompletionStreamResponseDeltaFunctionCall {
 pub struct ChatChoiceStream {
     pub index: u32,
     pub delta: ChatCompletionStreamResponseDelta,
-    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::FinishReason>))]
+    // These keys are always serialized, including explicit nulls.
+    #[cfg_attr(feature = "protocol-schema", schema(required, value_type = Option<crate::schema::FinishReason>))]
     pub finish_reason: Option<FinishReason>,
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub logprobs: Option<ChatChoiceLogprobs>,
 }
 

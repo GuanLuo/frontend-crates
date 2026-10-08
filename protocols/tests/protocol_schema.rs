@@ -169,3 +169,99 @@ fn unary_and_stream_responses_retain_reasoning_and_usage() {
                     "finish_reason":null,"logprobs":null}]
     }));
 }
+
+#[test]
+fn stop_schema_accepts_empty_arrays_and_preserves_variant_shapes() {
+    let chat_schema = validator::<CreateChatCompletionRequest>();
+    let completion_schema = validator::<CreateCompletionRequest>();
+    for stop in [json!([]), json!("end"), json!(["end"]), json!([576])] {
+        let chat = json!({
+            "model":"test", "messages":[{"role":"user","content":"hi"}], "stop":stop
+        });
+        let completion = json!({"model":"test","prompt":"hi","stop":stop});
+        assert!(chat_schema.is_valid(&chat), "{chat}");
+        assert!(completion_schema.is_valid(&completion), "{completion}");
+        canonical::<CreateChatCompletionRequest>(chat);
+        canonical::<CreateCompletionRequest>(completion);
+    }
+    for stop in [json!(["end", 576]), json!([-1]), json!(true)] {
+        let chat = json!({
+            "model":"test", "messages":[{"role":"user","content":"hi"}], "stop":stop
+        });
+        let completion = json!({"model":"test","prompt":"hi","stop":stop});
+        assert!(!chat_schema.is_valid(&chat), "{chat}");
+        assert!(!completion_schema.is_valid(&completion), "{completion}");
+        assert!(serde_json::from_value::<CreateChatCompletionRequest>(chat).is_err());
+        assert!(serde_json::from_value::<CreateCompletionRequest>(completion).is_err());
+    }
+}
+
+fn required_nullable_output<T: ToSchema + DeserializeOwned + Serialize>(
+    input: Value,
+    required_fields: &[(&str, &str)],
+    omitted_fields: &[&str],
+) {
+    let parsed: T = serde_json::from_value(input).unwrap();
+    let output = serde_json::to_value(parsed).unwrap();
+    let schema = validator::<T>();
+    assert!(schema.is_valid(&output), "{output}");
+    for &(parent, field) in required_fields {
+        assert_eq!(
+            output.pointer(parent).unwrap().get(field),
+            Some(&Value::Null)
+        );
+        let mut missing = output.clone();
+        missing
+            .pointer_mut(parent)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            !schema.is_valid(&missing),
+            "missing {parent}/{field}: {missing}"
+        );
+        // Deserialization remains permissive; this schema describes output.
+        assert!(serde_json::from_value::<T>(missing).is_ok());
+    }
+    for pointer in omitted_fields {
+        assert!(output.pointer(pointer).is_none(), "{pointer}: {output}");
+    }
+}
+
+#[test]
+fn unary_response_requires_always_serialized_nullable_fields() {
+    required_nullable_output::<CreateChatCompletionResponse>(
+        json!({
+            "id":"chat-1","object":"chat.completion","created":1,"model":"test",
+            "choices":[{"index":0,"message":{"role":"assistant"}}]
+        }),
+        &[
+            ("/choices/0/message", "content"),
+            ("/choices/0/message", "refusal"),
+            ("/choices/0", "finish_reason"),
+            ("/choices/0", "logprobs"),
+        ],
+        &[
+            "/choices/0/message/tool_calls",
+            "/choices/0/message/reasoning_content",
+            "/usage",
+        ],
+    );
+}
+
+#[test]
+fn stream_response_requires_always_serialized_nullable_fields() {
+    required_nullable_output::<CreateChatCompletionStreamResponse>(
+        json!({
+            "id":"chat-1","object":"chat.completion.chunk","created":1,"model":"test",
+            "choices":[{"index":0,"delta":{}}]
+        }),
+        &[("/choices/0", "finish_reason"), ("/choices/0", "logprobs")],
+        &[
+            "/choices/0/delta/content",
+            "/choices/0/delta/refusal",
+            "/usage",
+        ],
+    );
+}
