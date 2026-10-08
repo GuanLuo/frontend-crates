@@ -27,7 +27,6 @@ macro_rules! imports {
                 ObjectBuilder::new()
                     // These imported Rust types are non-Option. Excluding null
                     // prevents overlap with utoipa's Option<T> oneOf null arm.
-                    // The marker remains incomplete until composition.
                     .schema_type(SchemaType::Array(vec![
                         Type::Object, Type::Array, Type::String,
                         Type::Number, Type::Boolean,

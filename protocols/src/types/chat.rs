@@ -54,8 +54,6 @@ pub enum Stop {
 }
 
 // Use anyOf because an empty array matches both array variants.
-// This is a schema-only correction; Serde parsing and Dynamo's
-// stop handling remain unchanged.
 #[cfg(feature = "protocol-schema")]
 impl utoipa::PartialSchema for Stop {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
@@ -407,7 +405,9 @@ pub struct ChatCompletionRequestToolMessage {
 #[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatChoiceLogprobs))]
 pub struct ChatChoiceLogprobs {
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub content: Option<Vec<ChatCompletionTokenLogprob>>,
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub refusal: Option<Vec<ChatCompletionTokenLogprob>>,
 }
 
@@ -424,6 +424,7 @@ pub struct ChatCompletionTokenLogprob {
     pub logprob: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_id: Option<u32>,
+    #[cfg_attr(feature = "protocol-schema", schema(required))]
     pub bytes: Option<Vec<u8>>,
     #[cfg_attr(feature = "protocol-schema", schema(value_type = Vec<crate::schema::TopLogprobs>))]
     pub top_logprobs: Vec<TopLogprobs>,

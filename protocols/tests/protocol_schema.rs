@@ -265,3 +265,35 @@ fn stream_response_requires_always_serialized_nullable_fields() {
         ],
     );
 }
+
+#[test]
+fn logprobs_require_nullable_content_and_refusal() {
+    required_nullable_output::<ChatChoiceLogprobs>(
+        json!({}),
+        &[("", "content"), ("", "refusal")],
+        &[],
+    );
+    canonical::<ChatChoiceLogprobs>(json!({"content":[],"refusal":[]}));
+}
+
+#[test]
+fn token_logprobs_require_nullable_bytes_but_not_token_id() {
+    required_nullable_output::<ChatCompletionTokenLogprob>(
+        json!({"token":"a","logprob":-0.5,"top_logprobs":[]}),
+        &[("", "bytes")],
+        &["/token_id"],
+    );
+    for bytes in [json!(null), json!([]), json!([97])] {
+        let token = json!({"token":"a","logprob":-0.5,"bytes":bytes,"top_logprobs":[]});
+        canonical::<ChatCompletionTokenLogprob>(token.clone());
+        let logprobs = json!({"content":[token.clone()],"refusal":[token]});
+        canonical::<CreateChatCompletionResponse>(json!({
+            "id":"chat-1","object":"chat.completion","created":1,"model":"test",
+            "choices":[{"index":0,"message":{"role":"assistant"},"logprobs":logprobs}]
+        }));
+        canonical::<CreateChatCompletionStreamResponse>(json!({
+            "id":"chat-1","object":"chat.completion.chunk","created":1,"model":"test",
+            "choices":[{"index":0,"delta":{},"logprobs":logprobs}]
+        }));
+    }
+}
