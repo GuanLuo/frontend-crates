@@ -931,11 +931,8 @@ impl<'de> Deserialize<'de> for ChatCompletionRequestSystemMessage {
 #[builder(setter(into, strip_option), default)]
 #[builder(derive(Debug))]
 #[builder(build_fn(error = "OpenAIError"))]
-#[cfg_attr(feature = "protocol-schema", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "protocol-schema", schema(as = dynamo_protocols::chat::ChatCompletionRequestAssistantMessage))]
 pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionRequestAssistantMessageContent>))]
     pub content: Option<ChatCompletionRequestAssistantMessageContent>,
     /// Reasoning content from a previous assistant turn.
     /// Accept both `reasoning_content` (DeepSeek /
@@ -949,7 +946,6 @@ pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "protocol-schema", schema(value_type = Option<crate::schema::ChatCompletionRequestAssistantMessageAudio>))]
     pub audio: Option<ChatCompletionRequestAssistantMessageAudio>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,

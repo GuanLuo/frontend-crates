@@ -33,6 +33,27 @@ endpoint families are outside this initial schema surface.
 struct Contract;
 ```
 
+Request schemas describe accepted input where supported; response schemas describe
+canonical serialized output. These are different contracts: accepting a value on
+input does not mean the serializer emits that shape. In particular:
+
+- Assistant request `function_call.arguments` and `tool_calls[].function.arguments`
+  accept strings or JSON objects. Objects normalize to strings; response argument
+  schemas remain string-only. Request-only components are named
+  `dynamo_protocols.chat.RequestFunctionCall` and `dynamo_protocols.chat.RequestToolCall`.
+- Assistant requests accept `reasoning` or `reasoning_content`, with the same
+  nullable string-or-string-array type. Both names together are rejected, even
+  when their values are equal or null. Neither spelling is deprecated. Serialization
+  uses only `reasoning_content` (and omits it when absent).
+- The alias uses standard JSON Schema constraints, not a custom extension.
+  Consumers should use this exported request definition directly instead of
+  adding an alias property or `x-dynamo-input-aliases` metadata themselves.
+
+Input fidelity tests validate original JSON and compare acceptance with Serde.
+Output fidelity tests serialize typed values and validate that result, separately
+checking required nullable keys. Acceptance is not assumed to be identical in
+both directions. The cases cover the rules above, not every possible request.
+
 The export describes types defined in this crate. When a field uses a type
 from `async-openai` that has no schema support, the export keeps the field but
 uses a placeholder for its type. For example, a completion request describes
@@ -78,12 +99,12 @@ this crate. The following are not currently covered:
   Files, Embeddings, Images, and Realtime do not have schema exports through
   this feature. It also does not define server error-response contracts.
 - **The full accepted-input contract.** The schemas describe canonical
-  typed/serialized forms, not every custom deserializer path. Input aliases
-  (`reasoning`), object-valued function arguments, media shorthand, tools-only
-  system messages, and null stream-option booleans can normalize before
-  serialization. Role-specific validation can reject other combinations.
-  These differences need separate coverage; the generated schema is not a
-  drop-in replacement for request deserialization or validation.
+  shapes plus the explicit request-side argument and reasoning-alias rules
+  above, not every custom deserializer path. Media shorthand, tools-only system
+  messages, and null stream-option booleans can normalize before serialization.
+  Role-specific validation can reject other combinations. These remaining
+  differences need separate coverage; the generated schema is not a drop-in
+  replacement for request deserialization or validation.
 - **Contents of arbitrary JSON fields.** Fields such as `mm_processor_kwargs`
   expose their declared container shape, not backend/model-specific keys or
   semantics. Their presence in the schema does not establish backend support.
